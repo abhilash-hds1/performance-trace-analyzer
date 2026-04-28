@@ -20,7 +20,7 @@ export const config = Object.freeze({
   host: process.env.HOST || '127.0.0.1',
   allowedOrigins: parseOriginsEnv(process.env.ALLOWED_EXTENSION_ORIGINS),
   openai: {
-    apiKey: process.env.OPENAI_API_KEY || '',
+    apiKey: (process.env.OPENAI_API_KEY || '').trim(),
     model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
     baseUrl: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
   },
@@ -29,6 +29,8 @@ export const config = Object.freeze({
   github: {
     clientId: process.env.GITHUB_CLIENT_ID || '',
     clientSecret: process.env.GITHUB_CLIENT_SECRET || '',
+    /** Optional PAT for private repos and higher rate limits on Contents API */
+    token: (process.env.GITHUB_TOKEN || '').trim(),
   },
 });
 

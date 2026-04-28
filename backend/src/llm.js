@@ -33,11 +33,20 @@ export const ANALYSIS_SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['action', 'rationale'],
+        required: ['action', 'rationale', 'codePointer', 'codeSuggestion'],
         properties: {
           action: { type: 'string' },
           rationale: { type: 'string' },
-          codePointer: { type: ['string', 'null'] },
+          codePointer: {
+            type: ['string', 'null'],
+            description:
+              'Repo-relative path : line number, e.g. src/app/foo.component.ts:42. In component mode, line MUST match the numbered column in excerpts.',
+          },
+          codeSuggestion: {
+            type: ['string', 'null'],
+            description:
+              'Optional concrete snippet: replacement code, config block, or minimal unified diff; must match excerpts',
+          },
         },
       },
     },
@@ -48,9 +57,13 @@ export const ANALYSIS_SCHEMA = {
 const SYSTEM_PROMPT = [
   'You are a web performance analyst.',
   'You are given a compact summary derived from a Chrome performance trace.',
+  'Optional repository excerpts are a SMALL subset: project configs / entrypoints plus files correlated to hot trace URLs.',
+  'You do NOT have the full repository—never claim you analyzed every file.',
   'Identify likely bottlenecks (long tasks, layout/paint thrash, heavy scripts, slow resources, GC).',
   'Rules:',
-  '- Use ONLY information present in the provided summary; do not invent URLs or stacks.',
+  '- Use ONLY the compact summary and provided excerpts; do not invent URLs, stacks, or file contents.',
+  '- When excerpts exist, set codePointer to path:line when inferable; in COMPONENT-FOCUSED MODE (user message) codePointer MUST be path:line using line numbers from the left column of excerpts.',
+  '- For up to 3 highest-impact recommendations, set codeSuggestion to copy-pasteable replacement code grounded in excerpts; in component mode tie it to that path:line. Use null if you cannot ground it.',
   '- Prefer specificity (event names, durations) over generic advice.',
   '- Output strictly conforms to the provided JSON schema.',
 ].join(' ');
@@ -60,11 +73,11 @@ const SYSTEM_PROMPT = [
  * LLM call fails. Picks the worst long task / event and returns a structurally
  * correct analysis so the extension UI is never left empty.
  */
-export function stubAnalysisFor(compactSummary) {
-  return stubAnalysis(compactSummary);
+export function stubAnalysisFor(compactSummary, githubBundle = null) {
+  return stubAnalysis(compactSummary, githubBundle);
 }
 
-function stubAnalysis(compactSummary) {
+function stubAnalysis(compactSummary, githubBundle = null) {
   const worstLong = compactSummary.topLongTasks?.[0];
   const worstEvent = compactSummary.topEvents?.[0];
   const bottlenecks = [];
@@ -85,15 +98,22 @@ function stubAnalysis(compactSummary) {
       suspectUrl: worstEvent.url || null,
     });
   }
+  const ghNote = githubBundle?.label
+    ? ` Linked repo ${githubBundle.label}${githubBundle.ref ? `@${githubBundle.ref}` : ''} (${githubBundle.snippets?.length ? `${githubBundle.snippets.length} excerpt(s)` : 'no matching public files fetched'}).`
+    : '';
+
+  const pointer = githubBundle?.snippets?.[0]?.path || null;
+
   return {
-    summary: `Stub analysis (no OPENAI_API_KEY). Trace has ${compactSummary.totals?.events ?? 0} events over ${compactSummary.totals?.durationMs ?? 0} ms.`,
+    summary: `Stub analysis (no OPENAI_API_KEY). Trace has ${compactSummary.totals?.events ?? 0} events over ${compactSummary.totals?.durationMs ?? 0} ms.${ghNote}`,
     bottlenecks,
     recommendations: bottlenecks.length
       ? [
           {
             action: `Investigate ${bottlenecks[0].category} work on the main thread`,
             rationale: bottlenecks[0].evidence,
-            codePointer: null,
+            codePointer: pointer,
+            codeSuggestion: null,
           },
         ]
       : [],
@@ -161,7 +181,78 @@ function sleep(ms, signal) {
  * Retries transient 429 (rate-limit, NOT insufficient_quota) and 5xx with
  * exponential backoff. Honors `Retry-After` when present.
  */
-async function callOpenAI(compactSummary, { signal, maxRetries = 2 } = {}) {
+const MAX_CODE_SUGGESTION_CHARS = 6000;
+
+function normalizeAnalysisOutput(analysis) {
+  if (!analysis || typeof analysis !== 'object' || !Array.isArray(analysis.recommendations)) return;
+  for (const r of analysis.recommendations) {
+    if (!r) continue;
+    if (r.codeSuggestion === undefined) r.codeSuggestion = null;
+    if (typeof r.codeSuggestion === 'string' && r.codeSuggestion.length > MAX_CODE_SUGGESTION_CHARS) {
+      r.codeSuggestion =
+        r.codeSuggestion.slice(0, MAX_CODE_SUGGESTION_CHARS) + '\n/* … truncated … */';
+    }
+  }
+}
+
+function buildUserContent(compactSummary, githubBundle) {
+  const chunks = [
+    'Analyze this compact performance summary and respond with JSON matching this schema:',
+    JSON.stringify(ANALYSIS_SCHEMA),
+    'Compact summary:',
+    JSON.stringify(compactSummary),
+  ];
+
+  if (githubBundle?.label) {
+    const refPart = githubBundle.ref ? ` @ ${githubBundle.ref}` : '';
+    chunks.push(
+      `Linked GitHub repository for correlation: ${githubBundle.label}${refPart}`,
+    );
+    if (githubBundle.snippets?.length) {
+      if (githubBundle.mode === 'components') {
+        chunks.push(
+          'COMPONENT-FOCUSED MODE: Analysis is LIMITED to the files below (entire folder scan, max 6 source files). Each file is shown with LINE NUMBERS as "  N|line text" — the N is the authoritative line number.',
+          `Components folder (repo-relative): ${githubBundle.componentsPath || '(unknown)'}`,
+          'Rules: Only recommend edits in these files. Every performance fix that changes code MUST set codePointer to `path:line` where path exactly matches the file path below and line matches N. codeSuggestion should be the concrete replacement or new code for that spot.',
+        );
+        for (const s of githubBundle.snippets) {
+          chunks.push(`--- file: ${s.path} (full file, line-numbered) ---\n${s.excerpt}`);
+        }
+      } else {
+        chunks.push(
+          'Repository excerpts below are partial (not the full codebase). Label [skeleton] = configs/layout; [trace] = hot URL–linked source.',
+        );
+        const sk = githubBundle.snippets.filter((s) => s.kind === 'skeleton');
+        const tr = githubBundle.snippets.filter((s) => s.kind === 'trace');
+        if (sk.length) {
+          chunks.push('--- [skeleton] Project / build excerpts ---');
+          for (const s of sk) {
+            chunks.push(`--- file: ${s.path} ---\n${s.excerpt}`);
+          }
+        }
+        if (tr.length) {
+          chunks.push('--- [trace] Hot-path correlated files ---');
+          for (const s of tr) {
+            chunks.push(`--- file: ${s.path} ---\n${s.excerpt}`);
+          }
+        }
+      }
+    } else if (githubBundle.pathsAttempted?.length) {
+      chunks.push(
+        'No file excerpts were fetched (missing paths on the branch, private repo without server token, or rate limit). Trace-derived paths tried: ' +
+          githubBundle.pathsAttempted.join(', '),
+      );
+    } else {
+      chunks.push(
+        'No source-looking paths were derived from trace URLs for this repo. Give repository-level performance guidance without inventing file contents.',
+      );
+    }
+  }
+
+  return chunks.join('\n\n');
+}
+
+async function callOpenAI(compactSummary, { signal, maxRetries = 2, githubBundle = null } = {}) {
   const url = `${config.openai.baseUrl.replace(/\/$/, '')}/chat/completions`;
   const body = {
     model: config.openai.model,
@@ -170,12 +261,7 @@ async function callOpenAI(compactSummary, { signal, maxRetries = 2 } = {}) {
       { role: 'system', content: SYSTEM_PROMPT },
       {
         role: 'user',
-        content: [
-          'Analyze this compact performance summary and respond with JSON matching this schema:',
-          JSON.stringify(ANALYSIS_SCHEMA),
-          'Compact summary:',
-          JSON.stringify(compactSummary),
-        ].join('\n\n'),
+        content: buildUserContent(compactSummary, githubBundle),
       },
     ],
     temperature: 0.2,
@@ -197,7 +283,9 @@ async function callOpenAI(compactSummary, { signal, maxRetries = 2 } = {}) {
       const data = await res.json();
       const content = data?.choices?.[0]?.message?.content || '{}';
       try {
-        return JSON.parse(content);
+        const parsed = JSON.parse(content);
+        normalizeAnalysisOutput(parsed);
+        return parsed;
       } catch {
         throw new Error('OpenAI returned non-JSON content');
       }
@@ -224,10 +312,10 @@ async function callOpenAI(compactSummary, { signal, maxRetries = 2 } = {}) {
   }
 }
 
-export async function analyzeCompactSummary(compactSummary, { signal } = {}) {
+export async function analyzeCompactSummary(compactSummary, { signal, githubBundle = null } = {}) {
   if (!hasOpenAI()) {
-    return { source: 'stub', model: null, analysis: stubAnalysis(compactSummary) };
+    return { source: 'stub', model: null, analysis: stubAnalysis(compactSummary, githubBundle) };
   }
-  const analysis = await callOpenAI(compactSummary, { signal });
+  const analysis = await callOpenAI(compactSummary, { signal, githubBundle });
   return { source: 'openai', model: config.openai.model, analysis };
 }

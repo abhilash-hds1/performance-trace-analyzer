@@ -133,7 +133,7 @@ async function startRecording({ tabId, preset }) {
   return { ok: true, preset: session.preset, startedAt: session.startedAt };
 }
 
-async function stopRecording({ tabId, apiBaseUrl }) {
+async function stopRecording({ tabId, apiBaseUrl, githubRepo, githubComponentsPath }) {
   if (typeof tabId !== 'number') throw new Error('tabId required');
   if (!apiBaseUrl) throw new Error('apiBaseUrl required');
   const session = sessions.get(tabId);
@@ -165,6 +165,8 @@ async function stopRecording({ tabId, apiBaseUrl }) {
       preset: session.preset,
       capturedAt: session.startedAt,
       durationMs: Date.now() - session.startedAt,
+      ...(githubRepo ? { githubRepo } : {}),
+      ...(githubComponentsPath ? { githubComponentsPath } : {}),
     },
   });
   return { ok: true, eventCount: traceEvents.length, upload };
@@ -184,16 +186,34 @@ async function uploadTrace(apiBaseUrl, body) {
   return res.json();
 }
 
-async function analyzeTrace({ apiBaseUrl, traceId, force }) {
+async function analyzeTrace({ apiBaseUrl, traceId, force, githubRepo, githubComponentsPath }) {
   if (!apiBaseUrl) throw new Error('apiBaseUrl required');
   if (!traceId) throw new Error('traceId required');
   const url = `${apiBaseUrl.replace(/\/$/, '')}/traces/${encodeURIComponent(traceId)}/analyze${force ? '?force=1' : ''}`;
-  const res = await fetch(url, { method: 'POST' });
+  const payload = {};
+  if (githubRepo) payload.githubRepo = githubRepo;
+  if (githubComponentsPath) payload.githubComponentsPath = githubComponentsPath;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const text = await res.text().catch(() => '');
   if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`analyze failed: HTTP ${res.status} ${text.slice(0, 200)}`);
+    let detail = text.slice(0, 400);
+    try {
+      const j = JSON.parse(text);
+      if (j.error) detail = j.error;
+    } catch {
+      /* keep detail */
+    }
+    throw new Error(detail || `analyze failed: HTTP ${res.status}`);
   }
-  return res.json();
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error('analyze returned invalid JSON');
+  }
 }
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {

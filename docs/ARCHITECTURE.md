@@ -36,7 +36,7 @@ flowchart LR
 - **HTTP API** (Fastify) — CORS enabled for `chrome-extension://` origins in development.
 - **Ingest** — `POST /traces` accepts JSON trace (`traceEvents` array or Chrome array form). Size cap enforced.
 - **Reducer** — deterministic extraction of top long tasks, high-duration events, and URL/script hints into `compactSummary` (bounded size).
-- **Analyze** — `POST /traces/:id/analyze` calls OpenAI with structured JSON output schema; optional second stage when GitHub token + repo are configured (placeholder routes return structured stubs until wired).
+- **Analyze** — `POST /traces/:id/analyze` calls OpenAI with structured JSON output schema; with a linked GitHub repo, the server fetches a **bounded** set of files—either **auto** (skeleton + trace-correlated paths) or **components** mode when `githubComponentsPath` is set: recursive listing under that repo-relative folder, **at most 6** matching source files or **`400`**, full file bodies with **line numbers** in excerpts. Recommendations may include **`codeSuggestion`** and **`path:line`** `codePointer` grounded in excerpts.
 
 ### Secrets and trust boundaries
 
@@ -54,13 +54,13 @@ Default retention: traces stored in memory with TTL (see `backend/src/store.js`)
 
 1. **Capture or import** — CDP trace or file -> `traceEvents[]` (or equivalent).
 2. **Upload** — `POST /traces` -> validate size -> parse -> reduce.
-3. **Analyze** — `POST /traces/:id/analyze` -> OpenAI(messages) with compact input + optional code snippets from GitHub.
+3. **Analyze** — `POST /traces/:id/analyze` -> OpenAI(messages) with compact input + optional GitHub excerpts (skeleton + trace-linked files, capped count/size).
 
 ## Git correlation (v1 direction)
 
-1. Reducer emits `candidates.urls` and stack-like strings.
-2. Backend resolves GitHub tree for `owner/repo@ref` (future: full OAuth + Contents API).
-3. LLM receives only **fetched snippets** with line numbers; output must cite `path:line` from provided text only.
+1. Reducer surfaces URL/script hints in `compactSummary`.
+2. Backend calls GitHub Contents API for a **fixed candidate path list** (skeleton files at repo and package roots, then paths derived from trace URLs); optional token for private repos.
+3. LLM receives only **fetched snippets**; must not claim full-repo knowledge. Output cites `path:line` when inferable; may include **`codeSuggestion`** for copy-paste fixes when grounded.
 
 ## Extension permissions
 

@@ -9,10 +9,32 @@
   <body>
     <header class="topbar">
       <h1>Perf AI</h1>
-      <div class="api">
-        <label for="apiBaseUrl">API base URL</label>
-        <input id="apiBaseUrl" type="url" placeholder="http://localhost:8787" />
-        <button id="saveApi" type="button">Save</button>
+      <div class="topbar-settings">
+        <div class="api">
+          <label for="apiBaseUrl">API base URL</label>
+          <input id="apiBaseUrl" type="url" placeholder="http://localhost:8787" />
+          <button id="saveApi" type="button">Save</button>
+        </div>
+        <div class="github-repo">
+          <label for="githubRepo">GitHub repo (optional)</label>
+          <input
+            id="githubRepo"
+            type="text"
+            placeholder="org/repo or https://github.com/org/repo"
+            spellcheck="false"
+            title="Matches script URLs in the trace to source files in this repo for richer fix suggestions. Public repos work out of the box; private repos need GITHUB_TOKEN on the backend."
+          />
+        </div>
+        <div class="github-components">
+          <label for="githubComponentsPath">Components folder (optional)</label>
+          <input
+            id="githubComponentsPath"
+            type="text"
+            placeholder="e.g. my-app/src/app/components"
+            spellcheck="false"
+            title="Repo-relative folder: AI analyzes only source files here (max 6). Subfolders included. More than 6 files returns an error."
+          />
+        </div>
       </div>
     </header>
 
@@ -43,18 +65,41 @@
 
     <section id="status" class="status" aria-live="polite"></section>
 
-    <section id="results" class="results" hidden>
-      <h2>Summary</h2>
-      <pre id="summary"></pre>
+    <section id="results" class="dashboard" hidden>
+      <header class="dash-header">
+        <div class="dash-header-row">
+          <h2 class="dash-heading">Analysis dashboard</h2>
+          <div id="dashMeta" class="dash-meta"></div>
+        </div>
+        <div id="dashStats" class="dash-stats"></div>
+      </header>
 
-      <h2>Bottlenecks</h2>
-      <ul id="bottlenecks"></ul>
+      <article class="summary-card">
+        <h3 class="card-label">Overview</h3>
+        <p id="summary" class="summary-body"></p>
+      </article>
 
-      <h2>Recommendations</h2>
-      <ul id="recommendations"></ul>
+      <section class="dash-panel" aria-labelledby="issues-heading">
+        <h3 id="issues-heading" class="panel-title">Issues detected</h3>
+        <p class="panel-hint">Hot spots from the trace (category and impact)</p>
+        <div id="bottlenecks" class="bottleneck-grid"></div>
+      </section>
 
-      <details>
-        <summary>Compact summary (sent to model)</summary>
+      <section class="dash-panel dash-fixes" aria-labelledby="fixes-heading">
+        <h3 id="fixes-heading" class="panel-title">Recommended fixes</h3>
+        <p class="panel-hint">
+          What to change first. Each item includes an "Exact fix" box: copy-paste snippet when the model is confident, or a note when it is not.
+        </p>
+        <div id="recommendations" class="fixes-grid"></div>
+      </section>
+
+      <details class="dash-technical dash-repo-excerpts" id="repoExcerptsWrap" hidden>
+        <summary>Repo excerpts (fetched from GitHub)</summary>
+        <div id="repoExcerpts" class="repo-excerpts"></div>
+      </details>
+
+      <details class="dash-technical">
+        <summary>Technical: compact summary (model input)</summary>
         <pre id="compact"></pre>
       </details>
     </section>

@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — GitHub repo correlation
+
+- Extension: optional **GitHub repo** field (saved with API settings) sends `githubRepo` with trace upload and analyze so the backend can map hot script URLs to repository paths.
+- Backend: parses `owner/repo` or `github.com/...` URLs, best-effort fetches small **public** file excerpts via the GitHub Contents API (optional `GITHUB_TOKEN` for private repos / rate limits), and passes excerpts to the LLM so **Recommended fixes** can cite real paths; analyze cache keys include the linked repo context. Analyze responses include `githubCorrelation` (paths + excerpts) for the **Repo excerpts** panel section.
+- Backend: GitHub path mapping understands **Vite `/@fs/`** absolute paths (Windows drive letters), skips **`.angular/cache`**, **`vite/deps`**, **`node_modules`**, and hashed **chunk-** bundles; infers monorepo package folders (e.g. `slow-shop-angular`) from those paths so **`polyfills.js` / `main.js`** resolve under the correct package `src/…` tree on GitHub.
+- Backend + panel: **Repo skeleton** fetch tries common **config / entry** paths (`package.json`, `angular.json`, `vite.config.*`, `tsconfig*.json`, `src/main.*`, etc.) at repo root and inferred package folders—still capped, not a full crawl. LLM **`codeSuggestion`** on recommendations (optional concrete snippet); panel shows **Exact fix** with **Copy** when present, and an explicit placeholder when no snippet (stub / low context).
+- Extension + API: optional **Components folder** (`githubComponentsPath`, repo-relative). When set (with `githubRepo`), analyze loads only source files under that path recursively—**max 6 files**; **`400`** if the folder has more. Files are sent **line-numbered** to the model; prompts require **`path:line`** `codePointer` and grounded **`codeSuggestion`**. Overrides auto skeleton/trace mode for that run. Analyze cache key includes the folder path.
+
 ### Added — Extension (`extension/`)
 
 - MV3 manifest with `devtools_page`, `background` service worker (module type),
@@ -25,6 +33,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - **Import** trace JSON (Chrome `traceEvents` array or `{ traceEvents }` shape).
   - Renders summary, bottlenecks (with category + impact badges), recommendations,
     and the compact summary that was sent to the model.
+  - **Analysis dashboard** layout: trace stat tiles, overview card, bottleneck
+    cards, and numbered **Recommended fixes** with rationale (and code pointer
+    when present).
   - Strict CSP; `connect-src` limited to localhost + HTTPS.
 - `background.js` service worker:
   - Owns the `chrome.debugger` lifecycle: attach, `Tracing.start` with the chosen

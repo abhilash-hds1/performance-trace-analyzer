@@ -19,8 +19,7 @@ test('reducer surfaces long tasks deterministically', () => {
   assert.equal(top.name, 'RunTask');
 });
 
-test('POST /traces then /analyze returns structured stub', async () => {
-  process.env.OPENAI_API_KEY = '';
+test('POST /traces then /analyze returns structured analysis', async () => {
   const app = await buildApp();
   try {
     const upload = await app.inject({
@@ -39,9 +38,13 @@ test('POST /traces then /analyze returns structured stub', async () => {
     });
     assert.equal(analyze.statusCode, 200);
     const body = analyze.json();
-    assert.equal(body.source, 'stub');
+    assert.ok(['stub', 'openai'].includes(body.source));
     assert.ok(Array.isArray(body.analysis.bottlenecks));
+    assert.ok(Array.isArray(body.analysis.recommendations));
     assert.ok(['low', 'medium', 'high'].includes(body.analysis.confidence));
+    for (const r of body.analysis.recommendations) {
+      assert.ok('codeSuggestion' in r);
+    }
   } finally {
     await app.close();
   }

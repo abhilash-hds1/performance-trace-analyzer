@@ -1,5 +1,14 @@
 import { reduceTrace } from './reducer.js';
 import { analyzeCompactSummary, stubAnalysisFor } from './llm.js';
+import {
+  parseGithubRepo,
+  githubContextKey,
+  fetchRepoSnippets,
+  fetchGithubComponentsFolder,
+  normalizeGithubComponentsPath,
+  githubCorrelationPayload,
+  stripInternalAnalysisFields,
+} from './github.js';
 
 const TRACE_BODY_SCHEMA = {
   type: 'object',
@@ -77,16 +86,80 @@ export async function registerRoutes(fastify, { store }) {
     if (!entry) return reply.code(404).send({ error: 'trace not found or expired' });
 
     const force = req.query && (req.query.force === '1' || req.query.force === 'true');
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const parsed =
+      parseGithubRepo(body.githubRepo) || parseGithubRepo(entry.meta?.githubRepo);
+    const fromBody =
+      body.githubComponentsPath != null ? String(body.githubComponentsPath).trim() : '';
+    const fromMeta =
+      entry.meta?.githubComponentsPath != null
+        ? String(entry.meta.githubComponentsPath).trim()
+        : '';
+    const trimmedComp = fromBody || fromMeta;
+    let componentsPathNorm = null;
+    if (trimmedComp) {
+      componentsPathNorm = normalizeGithubComponentsPath(trimmedComp);
+      if (!componentsPathNorm) {
+        return reply.code(400).send({
+          error:
+            'Invalid githubComponentsPath: use a repo-relative folder (no .., no leading slash). Example: slow-shop-angular/src/app/components',
+        });
+      }
+    }
+
+    if (componentsPathNorm && !parsed) {
+      return reply
+        .code(400)
+        .send({ error: 'githubComponentsPath requires githubRepo (org/repo or github.com URL).' });
+    }
+
+    const analyzeGithubKey = githubContextKey(parsed, componentsPathNorm) ?? null;
+
     if (!force) {
       const cached = store.getAnalysis(id);
-      if (cached) return { traceId: id, cached: true, ...cached };
+      const cachedKey = cached?.analyzeGithubKey ?? null;
+      if (cached && cachedKey === analyzeGithubKey) {
+        return { traceId: id, cached: true, ...stripInternalAnalysisFields(cached) };
+      }
     }
 
     const { compactSummary } = reduceTrace({ traceEvents: entry.traceEvents });
+
+    let githubBundle = null;
+    if (parsed && componentsPathNorm) {
+      const comp = await fetchGithubComponentsFolder(parsed, componentsPathNorm);
+      if (comp.error) {
+        return reply.code(400).send({ error: comp.error });
+      }
+      githubBundle = {
+        mode: 'components',
+        label: `${parsed.owner}/${parsed.repo}`,
+        ref: parsed.ref,
+        componentsPath: componentsPathNorm,
+        snippets: comp.snippets,
+        pathsAttempted: comp.pathsAttempted,
+      };
+    } else if (parsed) {
+      const { snippets, pathsAttempted } = await fetchRepoSnippets(parsed, compactSummary);
+      githubBundle = {
+        mode: 'auto',
+        label: `${parsed.owner}/${parsed.repo}`,
+        ref: parsed.ref,
+        snippets,
+        pathsAttempted,
+      };
+    }
+
+    const githubCorrelation = githubCorrelationPayload(githubBundle);
+
     try {
-      const result = await analyzeCompactSummary(compactSummary);
-      store.setAnalysis(id, result);
-      return { traceId: id, cached: false, ...result };
+      const result = await analyzeCompactSummary(compactSummary, { githubBundle });
+      store.setAnalysis(id, { ...result, analyzeGithubKey, githubCorrelation });
+      return {
+        traceId: id,
+        cached: false,
+        ...stripInternalAnalysisFields({ ...result, analyzeGithubKey, githubCorrelation }),
+      };
     } catch (err) {
       req.log.error(
         { err: { message: err.message, status: err.status, code: err.code } },
@@ -95,15 +168,19 @@ export async function registerRoutes(fastify, { store }) {
       const fallback = {
         source: 'stub',
         model: null,
-        analysis: stubAnalysisFor(compactSummary),
+        analysis: stubAnalysisFor(compactSummary, githubBundle),
         upstreamError: {
           message: err.message,
           status: err.status || null,
           code: err.code || null,
         },
       };
-      store.setAnalysis(id, fallback);
-      return reply.code(200).send({ traceId: id, cached: false, ...fallback });
+      store.setAnalysis(id, { ...fallback, analyzeGithubKey, githubCorrelation });
+      return reply.code(200).send({
+        traceId: id,
+        cached: false,
+        ...stripInternalAnalysisFields({ ...fallback, analyzeGithubKey, githubCorrelation }),
+      });
     }
   });
 
