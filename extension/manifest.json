@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "Perf AI Trace Analyzer",
+  "version": "0.1.0",
+  "description": "Capture or import Chrome performance traces and analyze bottlenecks via the Perf AI backend.",
+  "minimum_chrome_version": "116",
+  "devtools_page": "devtools.html",
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": ["debugger", "storage"],
+  "host_permissions": ["http://localhost/*", "http://127.0.0.1/*", "https://*/*"]
+}

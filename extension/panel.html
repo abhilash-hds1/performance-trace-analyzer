@@ -1,0 +1,64 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; connect-src http://localhost:* http://127.0.0.1:* https:" />
+    <title>Perf AI</title>
+    <link rel="stylesheet" href="panel.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>Perf AI</h1>
+      <div class="api">
+        <label for="apiBaseUrl">API base URL</label>
+        <input id="apiBaseUrl" type="url" placeholder="http://localhost:8787" />
+        <button id="saveApi" type="button">Save</button>
+      </div>
+    </header>
+
+    <section class="actions">
+      <fieldset>
+        <legend>Capture</legend>
+        <label>
+          Preset
+          <select id="preset">
+            <option value="safe">Safe</option>
+            <option value="deep">Deep (higher PII risk)</option>
+          </select>
+        </label>
+        <button id="startBtn" type="button">Start recording</button>
+        <button id="stopBtn" type="button" disabled>Stop &amp; analyze</button>
+        <p class="hint">
+          Uses <code>chrome.debugger</code> + CDP <code>Tracing</code>. Chrome will show
+          a banner that the tab is being controlled while recording is active.
+        </p>
+      </fieldset>
+
+      <fieldset>
+        <legend>Import</legend>
+        <input id="fileInput" type="file" accept="application/json,.json" />
+        <button id="importBtn" type="button" disabled>Upload &amp; analyze</button>
+      </fieldset>
+    </section>
+
+    <section id="status" class="status" aria-live="polite"></section>
+
+    <section id="results" class="results" hidden>
+      <h2>Summary</h2>
+      <pre id="summary"></pre>
+
+      <h2>Bottlenecks</h2>
+      <ul id="bottlenecks"></ul>
+
+      <h2>Recommendations</h2>
+      <ul id="recommendations"></ul>
+
+      <details>
+        <summary>Compact summary (sent to model)</summary>
+        <pre id="compact"></pre>
+      </details>
+    </section>
+
+    <script src="panel.js"></script>
+  </body>
+</html>

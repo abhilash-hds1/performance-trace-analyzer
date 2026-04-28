@@ -1,0 +1,21 @@
+{
+  "name": "perf-trace-analyzer-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Fastify API for Perf Trace Analyzer: ingest traces, reduce, analyze via OpenAI.",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "node --watch src/server.js",
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@fastify/cors": "^9.0.1",
+    "dotenv": "^16.4.5",
+    "fastify": "^4.28.1"
+  }
+}
