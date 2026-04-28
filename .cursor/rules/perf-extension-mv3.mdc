@@ -1,0 +1,13 @@
+---
+description: Chrome MV3 extension patterns for Perf AI DevTools panel
+globs: extension/**/*
+alwaysApply: false
+---
+
+# Extension rules
+
+- **MV3 only** — service worker is the sole background context; no persistent background page.
+- **Secrets** — never ship `OPENAI_API_KEY`, GitHub tokens, or `.env` in `extension/`; only store **API base URL** (and non-secret prefs) in `chrome.storage.local`.
+- **Debugger lifecycle** — always `detach` after `Tracing.tracingComplete` or on error; surface UX when `chrome.debugger` is attached (Chrome shows the automation banner).
+- **Messaging** — panel -> `chrome.runtime.sendMessage` -> service worker; include `tabId` from `chrome.devtools.inspectedWindow.tabId` for CDP targets.
+- **CORS** — extension pages calling the backend must match backend `ALLOWED_EXTENSION_ORIGINS` in dev.

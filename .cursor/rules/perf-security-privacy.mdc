@@ -1,0 +1,11 @@
+---
+description: Security and privacy for traces, OAuth, and CDP
+alwaysApply: true
+---
+
+# Security and privacy
+
+- Traces may contain **URLs, headers, script source, or PII** — default to shorter retention, HTTPS only, and minimal logging.
+- **GitHub OAuth** — use least-privilege scopes; store tokens **encrypted at rest** in production (stub in-memory OK for local hackathon only).
+- **CDP categories** — prefer a **safe** tracing preset for demos; label any **deep** preset as higher privacy risk in UI and docs.
+- **Extension** — `debugger` permission is powerful; document for users and avoid leaving the debugger attached when idle.

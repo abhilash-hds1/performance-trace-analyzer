@@ -1,0 +1,10 @@
+---
+description: When editing docs, keep CHANGELOG in sync for visible changes
+globs: docs/**/*.md
+alwaysApply: false
+---
+
+# Docs rules
+
+- If a change is **user-visible**, **API**, **permission**, or **OAuth** related, add an entry under **Unreleased** in `docs/CHANGELOG.md` in the same PR.
+- Prefer updating `docs/ARCHITECTURE.md` when boundaries move (new service, new data store, new permission).

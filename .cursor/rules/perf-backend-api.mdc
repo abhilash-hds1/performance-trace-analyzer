@@ -1,0 +1,13 @@
+---
+description: Backend API, trace ingest, reducer, and LLM orchestration
+globs: backend/**/*
+alwaysApply: false
+---
+
+# Backend rules
+
+- **Reduce before LLM** — never send full raw `traceEvents` to OpenAI; only `compactSummary` + bounded snippets.
+- **Size limits** — reject or stream-split oversized bodies at `POST /traces`; prefer gzip from client for large traces.
+- **Structured output** — use JSON schema or strict `response_format` style prompts so the UI can render bottlenecks reliably.
+- **Idempotency** — `analyze` on the same `traceId` should be safe to retry (same inputs -> allow replace or cached result).
+- **Env** — document all env vars in `backend/.env.example` only; never log secrets.
