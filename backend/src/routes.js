@@ -1,5 +1,5 @@
 import { reduceTrace } from './reducer.js';
-import { analyzeCompactSummary } from './llm.js';
+import { analyzeCompactSummary, stubAnalysisFor } from './llm.js';
 
 const TRACE_BODY_SCHEMA = {
   type: 'object',
@@ -88,12 +88,22 @@ export async function registerRoutes(fastify, { store }) {
       store.setAnalysis(id, result);
       return { traceId: id, cached: false, ...result };
     } catch (err) {
-      req.log.error({ err: { message: err.message, status: err.status } }, 'analyze failed');
-      return reply.code(502).send({
-        error: 'analyze failed',
-        detail: err.message,
-        upstreamStatus: err.status || null,
-      });
+      req.log.error(
+        { err: { message: err.message, status: err.status, code: err.code } },
+        'analyze failed; falling back to deterministic stub',
+      );
+      const fallback = {
+        source: 'stub',
+        model: null,
+        analysis: stubAnalysisFor(compactSummary),
+        upstreamError: {
+          message: err.message,
+          status: err.status || null,
+          code: err.code || null,
+        },
+      };
+      store.setAnalysis(id, fallback);
+      return reply.code(200).send({ traceId: id, cached: false, ...fallback });
     }
   });
 

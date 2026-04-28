@@ -56,10 +56,14 @@ const SYSTEM_PROMPT = [
 ].join(' ');
 
 /**
- * Deterministic stub used when no API key is configured. Picks the worst
- * long task / event and returns a structurally-correct analysis so the
- * extension UI can be developed end-to-end without spending on inference.
+ * Deterministic stub used when no API key is configured OR when the upstream
+ * LLM call fails. Picks the worst long task / event and returns a structurally
+ * correct analysis so the extension UI is never left empty.
  */
+export function stubAnalysisFor(compactSummary) {
+  return stubAnalysis(compactSummary);
+}
+
 function stubAnalysis(compactSummary) {
   const worstLong = compactSummary.topLongTasks?.[0];
   const worstEvent = compactSummary.topEvents?.[0];
@@ -97,11 +101,67 @@ function stubAnalysis(compactSummary) {
   };
 }
 
+function parseOpenAIError(rawText) {
+  let body = null;
+  try {
+    body = JSON.parse(rawText);
+  } catch {
+    return { code: null, message: rawText.slice(0, 300) };
+  }
+  const e = body?.error || {};
+  return {
+    code: e.code || e.type || null,
+    message: e.message || rawText.slice(0, 300),
+    type: e.type || null,
+    param: e.param || null,
+  };
+}
+
+function describeOpenAIError(status, parsed) {
+  if (status === 429 && parsed.code === 'insufficient_quota') {
+    return 'OpenAI account has no remaining quota. Add credits or a payment method at platform.openai.com -> Billing.';
+  }
+  if (status === 429) {
+    return `OpenAI rate limit exceeded${parsed.message ? ': ' + parsed.message : ''}`;
+  }
+  if (status === 401) {
+    return 'OpenAI rejected the API key (401). Check OPENAI_API_KEY in backend/.env.';
+  }
+  if (status === 404 && /model/i.test(parsed.message || '')) {
+    return `OpenAI model not found: ${config.openai.model}. Check OPENAI_MODEL.`;
+  }
+  if (status === 400) {
+    return `OpenAI rejected the request (400)${parsed.message ? ': ' + parsed.message : ''}`;
+  }
+  return `OpenAI HTTP ${status}${parsed.message ? ': ' + parsed.message : ''}`;
+}
+
+function isRetryable(status, code) {
+  if (status === 429 && code !== 'insufficient_quota') return true;
+  if (status >= 500 && status < 600) return true;
+  return false;
+}
+
+function sleep(ms, signal) {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(resolve, ms);
+    if (signal) {
+      signal.addEventListener('abort', () => {
+        clearTimeout(t);
+        reject(new Error('aborted'));
+      }, { once: true });
+    }
+  });
+}
+
 /**
  * Calls OpenAI Chat Completions with JSON-mode response_format. Uses fetch to
  * avoid an extra dependency. Returns parsed JSON conforming to ANALYSIS_SCHEMA.
+ *
+ * Retries transient 429 (rate-limit, NOT insufficient_quota) and 5xx with
+ * exponential backoff. Honors `Retry-After` when present.
  */
-async function callOpenAI(compactSummary, { signal } = {}) {
+async function callOpenAI(compactSummary, { signal, maxRetries = 2 } = {}) {
   const url = `${config.openai.baseUrl.replace(/\/$/, '')}/chat/completions`;
   const body = {
     model: config.openai.model,
@@ -121,32 +181,47 @@ async function callOpenAI(compactSummary, { signal } = {}) {
     temperature: 0.2,
   };
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      authorization: `Bearer ${config.openai.apiKey}`,
-    },
-    body: JSON.stringify(body),
-    signal,
-  });
+  let attempt = 0;
+  while (true) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${config.openai.apiKey}`,
+      },
+      body: JSON.stringify(body),
+      signal,
+    });
 
-  if (!res.ok) {
+    if (res.ok) {
+      const data = await res.json();
+      const content = data?.choices?.[0]?.message?.content || '{}';
+      try {
+        return JSON.parse(content);
+      } catch {
+        throw new Error('OpenAI returned non-JSON content');
+      }
+    }
+
     const text = await res.text().catch(() => '');
-    const err = new Error(`OpenAI HTTP ${res.status}`);
-    err.status = res.status;
-    err.body = text.slice(0, 500);
-    throw err;
+    const parsed = parseOpenAIError(text);
+    const retryable = isRetryable(res.status, parsed.code) && attempt < maxRetries;
+
+    if (!retryable) {
+      const err = new Error(describeOpenAIError(res.status, parsed));
+      err.status = res.status;
+      err.code = parsed.code;
+      err.body = text.slice(0, 500);
+      throw err;
+    }
+
+    const retryAfterHeader = res.headers.get('retry-after');
+    const retryAfterMs = retryAfterHeader && /^\d+$/.test(retryAfterHeader)
+      ? Number(retryAfterHeader) * 1000
+      : Math.min(8000, 500 * Math.pow(2, attempt));
+    attempt += 1;
+    await sleep(retryAfterMs, signal);
   }
-  const data = await res.json();
-  const content = data?.choices?.[0]?.message?.content || '{}';
-  let parsed;
-  try {
-    parsed = JSON.parse(content);
-  } catch {
-    throw new Error('OpenAI returned non-JSON content');
-  }
-  return parsed;
 }
 
 export async function analyzeCompactSummary(compactSummary, { signal } = {}) {

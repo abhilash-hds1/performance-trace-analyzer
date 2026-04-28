@@ -69,10 +69,16 @@ function clearResults() {
   els.compact.textContent = '';
 }
 
-function renderAnalysis({ analysis, source, model, compactSummary }) {
+function renderAnalysis({ analysis, source, model, compactSummary, upstreamError }) {
   els.results.hidden = false;
   els.summary.textContent = analysis?.summary || '(no summary)';
-  if (source === 'stub') {
+  if (source === 'stub' && upstreamError) {
+    const code = upstreamError.code ? ` [${upstreamError.code}]` : '';
+    setStatus(
+      `OpenAI call failed${code}: ${upstreamError.message}. Falling back to local stub analysis.`,
+      'warn',
+    );
+  } else if (source === 'stub') {
     setStatus('Analysis uses local stub (no OPENAI_API_KEY on backend)', 'warn');
   } else {
     setStatus(`Analyzed via ${source}${model ? ' / ' + model : ''}`);

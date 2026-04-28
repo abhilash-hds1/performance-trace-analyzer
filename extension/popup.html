@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+    <title>Perf AI</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        font: 13px/1.4 -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+        margin: 0;
+        padding: 12px 14px;
+        width: 280px;
+      }
+      h1 { font-size: 14px; margin: 0 0 6px; }
+      p { margin: 6px 0; }
+      ol { padding-left: 18px; margin: 6px 0; }
+      kbd {
+        font: 11px/1 ui-monospace, Menlo, Consolas, monospace;
+        border: 1px solid currentColor;
+        border-radius: 3px;
+        padding: 1px 4px;
+        opacity: 0.8;
+      }
+      .muted { opacity: 0.7; font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <h1>Perf AI</h1>
+    <p>This extension lives in <strong>DevTools</strong>, not as a toolbar popup.</p>
+    <ol>
+      <li>Press <kbd>F12</kbd> on any tab to open DevTools.</li>
+      <li>Click the <strong>Perf AI</strong> tab (use the <kbd>&raquo;</kbd> overflow if hidden).</li>
+      <li>Set the API base URL, then import a trace or start a recording.</li>
+    </ol>
+    <p class="muted">"Can't read or change site's data" is expected: this extension uses <code>chrome.debugger</code>, not page-level access.</p>
+  </body>
+</html>

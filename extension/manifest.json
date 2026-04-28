@@ -10,5 +10,9 @@
     "type": "module"
   },
   "permissions": ["debugger", "storage"],
-  "host_permissions": ["http://localhost/*", "http://127.0.0.1/*", "https://*/*"]
+  "host_permissions": ["http://localhost/*", "http://127.0.0.1/*"],
+  "action": {
+    "default_title": "Perf AI — open DevTools \u2192 Perf AI tab",
+    "default_popup": "popup.html"
+  }
 }

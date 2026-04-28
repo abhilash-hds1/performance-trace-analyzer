@@ -77,3 +77,72 @@ While attached, Chrome shows **"Chrome is being controlled by automated test sof
 - **Trace leakage** — traces may contain URLs, headers, or script content. Use HTTPS, cap size, delete after TTL, avoid logging bodies.
 - **Token theft** — encrypt GitHub tokens at rest in production; never return them to the extension.
 - **Over-broad tracing** — offer "safe" vs "deep" presets; deep may include more PII-risk categories.
+
+## Repo layout (current)
+
+```
+backend/
+  package.json           Fastify + dotenv; npm scripts: dev, start, test
+  .env.example           All env vars documented; .env is git-ignored
+  src/
+    config.js            Typed env loader (port, CORS, OpenAI, caps, GitHub)
+    store.js             In-memory trace + analysis store with TTL eviction
+    reducer.js           Deterministic trace -> compactSummary
+    llm.js               OpenAI JSON-mode call + ANALYSIS_SCHEMA + local stub
+    routes.js            POST/GET/DELETE /traces, POST /traces/:id/analyze, /health
+    server.js            Fastify bootstrap, CORS allowlist, security headers
+  test/
+    smoke.test.mjs       Reducer + ingest/analyze flow + bad-input cases
+extension/
+  manifest.json          MV3, devtools_page, debugger + storage permissions
+  devtools.html / .js    Registers the "Perf AI" panel
+  panel.html / .css / .js  UI: API URL, presets, capture, import, results
+  background.js          Service worker: chrome.debugger lifecycle, CDP Tracing,
+                         buffers events, POSTs to backend, runs analyze
+```
+
+## Implementation status
+
+| Area | Status | Notes |
+|------|--------|-------|
+| Extension MV3 manifest | Done | `debugger`, `storage`, `devtools_page`; no host secrets |
+| DevTools panel UI | Done | Save API URL, presets, capture, import, results render |
+| Service worker capture | Done | `Tracing.start/end`, `dataCollected`, always-detach `finally` |
+| Backend ingest + reduce | Done | Body limit, deterministic `compactSummary` |
+| Backend analyze (OpenAI) | Done | JSON-mode + `ANALYSIS_SCHEMA`; cached per `traceId` |
+| Local analysis stub | Done | Used when `OPENAI_API_KEY` is empty |
+| In-memory store + TTL | Done | `TRACE_TTL_MS` configurable |
+| CORS allowlist | Done | `ALLOWED_EXTENSION_ORIGINS`, glob `chrome-extension://*` |
+| Smoke tests | Done | `npm test` (3 tests) |
+| GitHub correlation | Stub only | No OAuth flow yet; reducer emits URL hints already |
+| Persistent storage | Pending | In-memory only; production should use object storage |
+| Token encryption at rest | Pending | Required before storing real GitHub tokens |
+| Streaming / gzip ingest | Pending | Currently buffered JSON within `MAX_TRACE_BYTES` |
+
+## Next steps
+
+1. **Trace ingest hardening**
+   - Accept `Content-Encoding: gzip` and stream-parse via a JSON streaming parser to lift the practical size ceiling.
+   - Optional `multipart/form-data` upload path for very large `.json` traces.
+2. **GitHub correlation (v1)**
+   - Add `GET /auth/github/start` / `GET /auth/github/callback` with PKCE; encrypt tokens at rest using a key from `BACKEND_SECRET_KEY` (new env var).
+   - `POST /traces/:id/correlate` resolves `candidates.urls` to `owner/repo@ref:path`, fetches snippets via Contents API, then calls the LLM with **only fetched snippets**; output must cite `path:line`.
+3. **Persistence**
+   - Replace `store.js` Map with pluggable backends: `MemoryStore` (default), `S3Store` (configurable bucket), `RedisStore` (TTL-native).
+4. **Reducer improvements**
+   - Long-task attribution via `disabled-by-default-devtools.timeline.stack` frames.
+   - Resource timing aggregation (request blocked-on, TTFB, transferSize) when `network` events are present.
+   - LCP/CLS extraction from `loading` and `blink.user_timing` so the UI can show core web vitals.
+5. **Extension UX**
+   - Surface the "deep preset = higher PII risk" warning prominently in panel before recording starts.
+   - Show a non-blocking banner reminding the user the tab is being controlled by the debugger; auto-detach on panel close.
+   - Persist last N analyses keyed by URL for quick comparison.
+6. **CI / quality**
+   - Add ESLint + Prettier configs (separate for `extension/` and `backend/`).
+   - GitHub Actions: install, lint, `npm test` on PR; Bugbot already covered via `.cursor/BUGBOT.md`.
+7. **Observability**
+   - Structured request logging redacting body content; `/metrics` endpoint with per-route counters.
+   - Capture model latency and token counts (without logging prompts) for cost tracking.
+8. **Distribution**
+   - Add an `icons/` set so the extension can be packaged for Chrome Web Store.
+   - Document how to point the panel at a hosted backend (TLS + CORS allowlist for the extension's `chrome-extension://<id>` origin).
